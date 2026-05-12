@@ -3,8 +3,8 @@
 # ==============================================================================
 # CONFIGURATION - Update these with the values provided in your lab
 # ==============================================================================
-export REGION="REPLACE_WITH_YOUR_REGION"
-export ZONE="REPLACE_WITH_YOUR_ZONE"
+export REGION="asia-south1"
+export ZONE="asia-south1-b"
 
 echo "🚀 Starting Challenge Lab: Implement Load Balancing on Compute Engine..."
 

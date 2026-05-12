@@ -2,11 +2,14 @@
 
 # Set Variables
 PROJECT_ID=$(gcloud config get-value project)
+PROJECT_NUMBER=$(gcloud projects list --filter="$PROJECT_ID" --format="value(projectNumber)")
 BUCKET_NAME="qwiklabs-gcp-00-b6b10394c586-bucket"
 TOPIC_NAME="topic-memories-568"
 REGION="us-central1"
 FUNCTION_NAME="memories-thumbnail-maker"
 PREVIOUS_ENGINEER="student-00-e6f830c1366e@qwiklabs.net"
+
+echo "Starting lab deployment..."
 
 # 1. Create a Bucket
 gcloud storage buckets create gs://$BUCKET_NAME --location=$REGION
@@ -14,8 +17,22 @@ gcloud storage buckets create gs://$BUCKET_NAME --location=$REGION
 # 2. Create a Pub/Sub Topic
 gcloud pubsub topics create $TOPIC_NAME
 
-# 3. Prepare Cloud Run Function code
-mkdir -p $FUNCTION_NAME && cd $FUNCTION_NAME
+# 3. Fix Eventarc Permissions (Prevents the 400/403 errors)
+echo "Granting permissions to Eventarc Service Agent..."
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-eventarc.iam.gserviceaccount.com" \
+  --role="roles/pubsub.publisher"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-eventarc.iam.gserviceaccount.com" \
+  --role="roles/storage.admin"
+
+# Wait for IAM propagation
+echo "Waiting 30 seconds for IAM propagation..."
+sleep 30
+
+# 4. Prepare Cloud Run Function code
+mkdir -p ~/$FUNCTION_NAME && cd ~/$FUNCTION_NAME
 
 cat <<EOF > index.js
 const functions = require('@google-cloud/functions-framework');
@@ -23,11 +40,10 @@ const { Storage } = require('@google-cloud/storage');
 const { PubSub } = require('@google-cloud/pubsub');
 const sharp = require('sharp');
 
-functions.cloudEvent('memories-thumbnail-maker', async cloudEvent => {
+functions.cloudEvent('$FUNCTION_NAME', async cloudEvent => {
   const event = cloudEvent.data;
   const fileName = event.name;
   const bucketName = event.bucket;
-  const size = "64x64";
   const bucket = new Storage().bucket(bucketName);
   const topicName = "$TOPIC_NAME";
   const pubsub = new PubSub();
@@ -68,7 +84,8 @@ cat <<EOF > package.json
 }
 EOF
 
-# 4. Deploy the Cloud Run Function (2nd Gen)
+# 5. Deploy the Cloud Run Function (2nd Gen)
+# Using --quiet to auto-confirm and --source=. to ensure it looks in the current dir
 gcloud functions deploy $FUNCTION_NAME \
   --gen2 \
   --runtime=nodejs22 \
@@ -76,12 +93,17 @@ gcloud functions deploy $FUNCTION_NAME \
   --source=. \
   --entry-point=$FUNCTION_NAME \
   --trigger-bucket=$BUCKET_NAME \
-  --allow-unauthenticated
+  --allow-unauthenticated \
+  --quiet
 
-# 5. Remove the previous cloud engineer
-cd ..
+# 6. Remove the previous cloud engineer
 gcloud projects remove-iam-policy-binding $PROJECT_ID \
   --member="user:$PREVIOUS_ENGINEER" \
   --role="roles/viewer"
 
-echo "Lab setup complete!"
+# 7. Test upload to trigger function
+echo "Uploading test image..."
+curl https://storage.googleapis.com/cloud-training/gsp315/map.jpg --output map.jpg
+gcloud storage cp map.jpg gs://$BUCKET_NAME/
+
+echo "Lab setup complete and test image uploaded!"

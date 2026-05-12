@@ -3,64 +3,68 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# --- Configuration ---
-# Replace these with the actual values provided in your lab instructions
+# --- Updated Lab Configuration ---
 export PROJECT_ID=$(gcloud config get-value project)
-export REGION="us-east1"
-export ZONE="us-east1-b"
-export ROLE_NAME="orca_storage_update"
-export SERVICE_ACCOUNT_NAME="orca-service-account"
-export CLUSTER_NAME="orca-test-cluster"
+export REGION="us-west1"
+export ZONE="us-west1-c"
+
+# Specific values from your lab credentials
+export ROLE_NAME="orca_storage_editor_387"
+export SERVICE_ACCOUNT_NAME="orca-private-cluster-783-sa"
+export CLUSTER_NAME="orca-cluster-931"
+
+# Network details from lab scenario
 export NETWORK="orca-build-vpc"
 export SUBNET="orca-build-subnet"
 
-# 1. Create a custom security role
+echo "Step 1: Creating custom security role..."
 gcloud iam roles create $ROLE_NAME --project=$PROJECT_ID \
-    --title="Custom Security Role" \
+    --title="Orca Storage Editor" \
     --description="Permissions to add and update objects in GCS" \
     --permissions="storage.buckets.get,storage.objects.get,storage.objects.list,storage.objects.update,storage.objects.create" \
     --stage=GA
 
-# 2. Create a service account
+echo "Step 2: Creating service account..."
 gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME \
-    --display-name="Orca Service Account"
+    --display-name="Orca Private Cluster Service Account"
 
-# 3. Bind roles to the service account
-# Bind the custom role
+echo "Step 3: Binding roles to the service account..."
+# Custom Role
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$SERVICE_ACCOUNT_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="projects/$PROJECT_ID/roles/$ROLE_NAME"
 
-# Bind required GKE roles
+# Required GKE roles
 for role in roles/monitoring.viewer roles/monitoring.metricWriter roles/logging.logWriter; do
     gcloud projects add-iam-policy-binding $PROJECT_ID \
         --member="serviceAccount:$SERVICE_ACCOUNT_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
         --role="$role"
 done
 
-# 4. Create the Private GKE Cluster
-# Note: We enable master authorized networks but will add the jump host IP in the next step
+echo "Step 4: Creating Private GKE Cluster..."
+# Creating the cluster with private endpoint and master authorized networks enabled
 gcloud container clusters create $CLUSTER_NAME \
     --project=$PROJECT_ID \
     --zone=$ZONE \
-    --release-channel="regular" \
     --network=$NETWORK \
     --subnetwork=$SUBNET \
     --service-account="$SERVICE_ACCOUNT_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
     --enable-ip-alias \
     --enable-private-nodes \
+    --enable-private-endpoint \
     --enable-master-authorized-networks \
     --master-ipv4-cidr="172.16.0.0/28" \
     --no-enable-basic-auth \
     --metadata disable-legacy-endpoints=true
 
-# Get the Internal IP of the jumphost to authorize it
+echo "Step 5: Authorizing the Jumphost..."
+# Get the Internal IP of the orca-jumphost
 JUMP_HOST_IP=$(gcloud compute instances describe orca-jumphost --zone=$ZONE --format='get(networkInterfaces[0].networkIP)')
 
-# Update cluster to authorize the jumphost
+# Update cluster to authorize the jumphost internal IP
 gcloud container clusters update $CLUSTER_NAME \
     --zone=$ZONE \
     --enable-master-authorized-networks \
     --master-authorized-networks="${JUMP_HOST_IP}/32"
 
-echo "Build script complete. Connect to orca-jumphost to perform Task 5."
+echo "Infrastructure setup complete. Use the orca-jumphost to deploy the application."

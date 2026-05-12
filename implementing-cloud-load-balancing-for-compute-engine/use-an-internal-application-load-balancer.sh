@@ -3,10 +3,10 @@
 # ==============================================================================
 # CONFIGURATION - Update these with the values provided in your lab
 # ==============================================================================
-export REGION="us-central1"
-export ZONE="us-central1-a"
+export REGION="us-west1"
+export ZONE="us-west1-a"
 
-export ILB_IP="REPLACE_WITH_INTERNAL_IP" # Usually something like 10.128.0.5
+export ILB_IP="10.138.0.10" # Usually something like 10.128.0.5
 
 echo "🚀 Starting Internal Application Load Balancer setup..."
 

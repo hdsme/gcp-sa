@@ -45,7 +45,16 @@ echo "👉 Getting editor role definition..."
 gcloud iam roles describe editor --project $PROJECT_ID > new-role-definition.yaml
 
 echo "👉 Updating YAML with new permissions..."
-sed -i '/includedPermissions:/a\  - storage.buckets.get\n  - storage.buckets.list' new-role-definition.yaml
+cat <<EOF > new-role-definition.yaml
+title: "Role Editor"
+description: "Edit access for App Versions"
+stage: "ALPHA"
+includedPermissions:
+- appengine.versions.create
+- appengine.versions.delete
+- storage.buckets.get
+- storage.buckets.list
+EOF
 
 echo "👉 Updating editor role..."
 gcloud iam roles update editor \

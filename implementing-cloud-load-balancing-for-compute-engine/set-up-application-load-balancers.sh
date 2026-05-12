@@ -3,8 +3,8 @@
 # ==============================================================================
 # CONFIGURATION - Update these with the values provided in your lab
 # ==============================================================================
-export REGION="us-central1"
-export ZONE="us-central1-a"
+export REGION="us-west1"
+export ZONE="us-west1-b"
 
 echo "🚀 Starting Application Load Balancer setup..."
 

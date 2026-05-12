@@ -84,6 +84,11 @@ cat <<EOF > package.json
 }
 EOF
 
+for i in $(gcloud storage buckets notifications list gs://qwiklabs-gcp-00-b6b10394c586-bucket --format="value(notification.id)")
+do
+  gcloud storage buckets notifications delete $i gs://qwiklabs-gcp-00-b6b10394c586-bucket
+done
+
 # 5. Deploy the Cloud Run Function (2nd Gen)
 # Using --quiet to auto-confirm and --source=. to ensure it looks in the current dir
 gcloud functions deploy $FUNCTION_NAME \

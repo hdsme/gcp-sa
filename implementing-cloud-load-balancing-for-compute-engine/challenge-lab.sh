@@ -37,22 +37,52 @@ gcloud compute firewall-rules create www-firewall-network-lb \
 # ------------------------------------------------------------------------------
 # TASK 2: Configure the Network Load Balancing service
 # ------------------------------------------------------------------------------
-echo "🌐 Reserving static IP for Network LB..."
-gcloud compute addresses create network-lb-ip-1 --region $REGION
 
-echo "🎯 Creating target pool..."
-gcloud compute target-pools create www-pool --region $REGION
+echo "🌐Reserving static external IP address..."
 
-echo "➕ Adding instances to target pool..."
+gcloud compute addresses create network-lb-ip-1 \
+    --region $REGION
+
+echo "✅ Static IP 'network-lb-ip-1' created successfully."
+
+gcloud compute target-pools create www-pool \
+    --region $REGION
+
+echo "✅ Target pool 'www-pool' created successfully."
+
 gcloud compute target-pools add-instances www-pool \
-    --instances web1,web2,web3 --instances-zone $ZONE
+    --instances web1,web2,web3 \
+    --instances-zone $ZONE
 
-echo "🏗️ Creating forwarding rule..."
+echo "✅ Instances web1, web2, web3 added to target pool."
+
+gcloud compute http-health-checks create basic-check
+
+echo "✅ Health check 'basic-check' created successfully."
+
+gcloud compute target-pools add-health-checks www-pool \
+    --http-health-check basic-check \
+    --region $REGION
+
+echo "✅ Health check attached to target pool successfully."
+echo ""
+
 gcloud compute forwarding-rules create www-rule \
     --region $REGION \
     --ports 80 \
     --address network-lb-ip-1 \
     --target-pool www-pool
+
+echo "✅ Forwarding rule 'www-rule' created successfully."
+
+echo "📌 Fetching Load Balancer IP address..."
+
+LB_IP=$(gcloud compute forwarding-rules describe www-rule \
+    --region $REGION \
+    --format="get(IPAddress)")
+
+echo "🌍 Load Balancer IP Address: $LB_IP"
+echo "✅ You can now access the application via: http://$LB_IP"
 
 # ------------------------------------------------------------------------------
 # TASK 3: Create an HTTP Load Balancer

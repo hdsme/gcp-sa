@@ -1,81 +1,60 @@
 #!/bin/bash
 
-# 1. Cấu hình biến (Thay đổi vùng theo yêu cầu của Lab nếu cần)
-# Thông thường Qwiklabs sẽ cấp sẵn vùng, script này tự động lấy vùng mặc định
-REGION_1=$(gcloud config get-value compute/region)
-ZONE_1=$(gcloud config get-value compute/zone)
-REGION_2="us-east1" # Ví dụ vùng thứ 2
-ZONE_2="us-east1-b"
+# 1. Gán giá trị trực tiếp từ thông tin Lab của bạn
+PROJECT_ID=$(gcloud config get-value project)
+ZONE_1="us-east4-a"       # Lấy từ mục Lab Zone trong bảng thông tin bên trái
+REGION_1="us-east4"       # Lấy từ mục Lab Region
+ZONE_2="asia-south1-b"
+REGION_2="asia-south1"
 
-# Nếu REGION_1 trống, gán giá trị mặc định
-[ -z "$REGION_1" ] && REGION_1="us-central1"
-[ -z "$ZONE_1" ] && ZONE_1="us-central1-c"
+echo "--- BẮT ĐẦU TRIỂN KHAI VPC  ---"
 
-echo "--- BẮT ĐẦU LAB: VPC Networking & Compute Engine ---"
+# 2. Xóa mạng default (Idempotent)
+echo "Đang dọn dẹp mạng default..."
+gcloud compute firewall-rules delete $(gcloud compute firewall-rules list --filter="network:default" --format="value(name)") --quiet 2>/dev/null
+gcloud compute networks delete default --quiet 2>/dev/null
 
-# TASK 1: Dọn dẹp Network mặc định (Nếu còn tồn tại)
-echo "Đang dọn dẹp firewall rules của mạng default..."
-RULES=$(gcloud compute firewall-rules list --filter="network:default" --format="value(name)")
-if [ ! -z "$RULES" ]; then
-    gcloud compute firewall-rules delete $RULES --quiet
-fi
-
-echo "Đang xóa mạng default..."
-if gcloud compute networks describe default > /dev/null 2>&1; then
-    gcloud compute networks delete default --quiet
-else
-    echo "Mạng default đã được xóa hoặc không tồn tại."
-fi
-
-
-# TASK 2: Tạo VPC 'mynetwork' và VM Instances
-echo "Đang tạo mạng 'mynetwork' (Auto mode)..."
+# 3. Tạo mạng mynetwork
 if ! gcloud compute networks describe mynetwork > /dev/null 2>&1; then
+    echo "Đang tạo mạng 'mynetwork'..."
     gcloud compute networks create mynetwork --subnet-mode=auto
-else
-    echo "Mạng 'mynetwork' đã tồn tại."
+    echo "Chờ subnet khởi tạo..."
+    sleep 20
 fi
 
-echo "Đang tạo Firewall rules cho 'mynetwork'..."
-# Tạo các rule chuẩn (ICMP, Internal, RDP, SSH)
-FIREWALL_RULES=("icmp" "custom" "rdp" "ssh")
-for rule in "${FIREWALL_RULES[@]}"; do
-    RULE_NAME="mynetwork-allow-$rule"
-    if ! gcloud compute firewall-rules describe $RULE_NAME > /dev/null 2>&1; then
+# 4. Tạo Firewall rules
+for rule in icmp custom rdp ssh; do
+    NAME="mynetwork-allow-$rule"
+    if ! gcloud compute firewall-rules describe $NAME > /dev/null 2>&1; then
         case $rule in
-            icmp) gcloud compute firewall-rules create $RULE_NAME --network=mynetwork --allow=icmp --source-ranges=0.0.0.0/0 ;;
-            custom) gcloud compute firewall-rules create $RULE_NAME --network=mynetwork --allow=tcp,udp,icmp --source-ranges=10.128.0.0/9 ;;
-            rdp) gcloud compute firewall-rules create $RULE_NAME --network=mynetwork --allow=tcp:3389 --source-ranges=0.0.0.0/0 ;;
-            ssh) gcloud compute firewall-rules create $RULE_NAME --network=mynetwork --allow=tcp:22 --source-ranges=0.0.0.0/0 ;;
+            icmp) gcloud compute firewall-rules create $NAME --network=mynetwork --allow=icmp --source-ranges=0.0.0.0/0 ;;
+            custom) gcloud compute firewall-rules create $NAME --network=mynetwork --allow=tcp,udp,icmp --source-ranges=10.128.0.0/9 ;;
+            rdp) gcloud compute firewall-rules create $NAME --network=mynetwork --allow=tcp:3389 --source-ranges=0.0.0.0/0 ;;
+            ssh) gcloud compute firewall-rules create $NAME --network=mynetwork --allow=tcp:22 --source-ranges=0.0.0.0/0 ;;
         esac
     fi
 done
 
-echo "Đang tạo VM instance: mynet-us-vm ($REGION_1)..."
+# 5. Tạo VM instance 1 (Sửa lỗi parse resource)
+echo "Đang tạo VM: mynet-us-vm tại $ZONE_1..."
 if ! gcloud compute instances describe mynet-us-vm --zone=$ZONE_1 > /dev/null 2>&1; then
     gcloud compute instances create mynet-us-vm \
         --zone=$ZONE_1 \
         --machine-type=e2-micro \
         --network=mynetwork
 else
-    echo "VM mynet-us-vm đã tồn tại."
+    echo "Instance mynet-us-vm đã tồn tại."
 fi
 
-echo "Đang tạo VM instance: mynet-r2-vm ($REGION_2)..."
+# 6. Tạo VM instance 2
+echo "Đang tạo VM: mynet-r2-vm tại $ZONE_2..."
 if ! gcloud compute instances describe mynet-r2-vm --zone=$ZONE_2 > /dev/null 2>&1; then
     gcloud compute instances create mynet-r2-vm \
         --zone=$ZONE_2 \
         --machine-type=e2-micro \
         --network=mynetwork
 else
-    echo "VM mynet-r2-vm đã tồn tại."
+    echo "Instance mynet-r2-vm đã tồn tại."
 fi
 
-
-# TASK 3: Kiểm tra kết nối (Optional)
-echo "--- THÔNG TIN CÁC INSTANCE ---"
-gcloud compute instances list --filter="name~'mynet-'"
-
-echo "--- HOÀN THÀNH ---"
-echo "Lưu ý: Để thực hiện Task 3 (xóa firewall test ping), bạn có thể dùng lệnh:"
-echo "gcloud compute firewall-rules delete mynetwork-allow-icmp --quiet"
+echo

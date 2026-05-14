@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 1. Cấu hình biến từ Lab
+# 1. Khai báo biến từ Lab
 PROJECT_ID=$(gcloud config get-value project)
 REGION="us-central1"
 ZONE="us-central1-a"
@@ -8,78 +8,78 @@ BUCKET_NAME=$PROJECT_ID
 DB_PASSWORD="Passw0rd1!"
 INSTANCE_NAME="bloghost"
 
-echo "--- BẮT ĐẦU TRIỂN KHAI LAB: STORAGE & SQL ---"
+echo "--- BẮT ĐẦU TRIỂN KHAI ---"
 
-# 2. Tạo VM bloghost (Đảm bảo Task 2 hoàn thành)
-if ! gcloud compute instances describe $INSTANCE_NAME --zone=$ZONE > /dev/null 2>&1; then
-    echo "Đang tạo VM $INSTANCE_NAME..."
-    # Lệnh này bao gồm đầy đủ các tham số mà hệ thống Checkpoint tìm kiếm
+# 2. Tạo VM bloghost (Qwiklabs-safe)
+
+if ! gcloud compute instances describe $INSTANCE_NAME --zone=$ZONE >/dev/null 2>&1; then
+    echo "Đang tạo VM bloghost..."
     gcloud compute instances create $INSTANCE_NAME \
-        --project=$PROJECT_ID \
         --zone=$ZONE \
         --machine-type=e2-standard-2 \
-        --network-interface=network-tier=PREMIUM,subnet=default \
+        --network-interface=subnet=default,address='',network-tier=PREMIUM \
+        --maintenance-policy=MIGRATE \
+        --provisioning-model=STANDARD \
         --tags=http-server \
-        --image-family=debian-12 \
-        --image-project=debian-cloud \
-        --boot-disk-size=10GB \
-        --boot-disk-type=pd-balanced \
+        --create-disk=auto-delete=yes,boot=yes,image-family=debian-12,image-project=debian-cloud,size=10,type=pd-balanced \
         --metadata=startup-script='#!/bin/bash
 apt-get update
-apt-get install apache2 php php-mysql -y
-service apache2 restart'
-    
-    # Tạo Firewall Rule cho HTTP (nếu chưa có)
-    gcloud compute firewall-rules create default-allow-http-80 \
-        --direction=INGRESS --priority=1000 --network=default --action=ALLOW \
-        --rules=tcp:80 --source-ranges=0.0.0.0/0 --target-tags=http-server > /dev/null 2>&1 || true
-else
-    echo "VM $INSTANCE_NAME đã tồn tại."
+apt-get install -y apache2 php php-mysql
+systemctl enable apache2
+systemctl restart apache2' \
+        --scopes=https://www.googleapis.com/auth/cloud-platform
+
 fi
 
-# Đợi 10 giây để VM ổn định và nhận IP
-echo "Đang đợi lấy IP ngoại vi..."
-sleep 10
-VM_IP=$(gcloud compute instances describe $INSTANCE_NAME --zone=$ZONE --format='get(networkInterfaces[0].accessConfigs[0].externalIp)')
+# 3. Mở Firewall Port 80
+gcloud compute firewall-rules create default-allow-http-80 \
+    --direction=INGRESS --priority=1000 --network=default --action=ALLOW \
+    --rules=tcp:80 --source-ranges=0.0.0.0/0 --target-tags=http-server > /dev/null 2>&1 || true
 
-# 3. Tạo Cloud Storage Bucket (Task 3)
+# 4. LẤY IP VM (Quan trọng: Vòng lặp chờ IP sẵn sàng)
+echo "Đang đợi máy ảo cấp IP..."
+for i in {1..12}; do
+    VM_IP=$(gcloud compute instances describe $INSTANCE_NAME --zone=$ZONE --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+    if [ ! -z "$VM_IP" ]; then
+        echo "Lấy thành công VM_IP: $VM_IP"
+        break
+    fi
+    echo "Đang thử lại ($i/12)..."
+    sleep 5
+done
+
+if [ -z "$VM_IP" ]; then echo "LỖI: Không lấy được IP VM."; exit 1; fi
+
+# 5. Cloud Storage (Task 3)
 if ! gcloud storage buckets describe gs://$BUCKET_NAME > /dev/null 2>&1; then
-    echo "Đang tạo bucket $BUCKET_NAME..."
     gcloud storage buckets create gs://$BUCKET_NAME --location=US
-    gcloud storage cp gs://cloud-training/gcpfci/my-excellent-blog.png .
-    gcloud storage cp my-excellent-blog.png gs://$BUCKET_NAME/my-excellent-blog.png
+    gsutil cp gs://cloud-training/gcpfci/my-excellent-blog.png .
+    gsutil cp my-excellent-blog.png gs://$BUCKET_NAME/
     gsutil acl ch -u allUsers:R gs://$BUCKET_NAME/my-excellent-blog.png
 fi
 
-# 4. Tạo Cloud SQL Instance (Task 4)
+# 6. Cloud SQL (Task 4)
 if ! gcloud sql instances describe blog-db > /dev/null 2>&1; then
     echo "Đang tạo Cloud SQL blog-db (Vui lòng chờ)..."
     gcloud sql instances create blog-db \
-        --database-version=MYSQL_8_0 \
-        --tier=db-f1-micro \
-        --region=$REGION \
-        --root-password=$DB_PASSWORD \
-        --storage-type=PD_SSD
+        --database-version=MYSQL_8_0 --tier=db-f1-micro --region=$REGION --root-password=$DB_PASSWORD
 fi
 
 SQL_IP=$(gcloud sql instances describe blog-db --format='get(ipAddresses[0].ipAddress)')
 
-# 5. Cấu hình User và Network cho SQL
-echo "Đang cấu hình kết nối SQL cho IP: $VM_IP"
+# 7. Ủy quyền và tạo User (Đã fix lỗi /32)
+echo "Đang ủy quyền IP $VM_IP cho SQL..."
 gcloud sql instances patch blog-db --authorized-networks=$VM_IP/32 --quiet
+
 if ! gcloud sql users list --instance=blog-db | grep -q "blogdbuser"; then
     gcloud sql users create blogdbuser --instance=blog-db --password=$DB_PASSWORD
 fi
 
-# 6. Cấu hình ứng dụng PHP (Task 5 & 6)
-echo "Đang cập nhật index.php lên máy chủ..."
+# 8. Cấu hình Website (Task 5 & 6)
 IMAGE_URL="https://storage.googleapis.com/$BUCKET_NAME/my-excellent-blog.png"
-
 cat <<EOF > index.php
-<html>
-<head><title>Welcome to my excellent blog</title></head>
-<body>
-<img src='$IMAGE_URL'>
+<html><body>
+<img src='$IMAGE_URL' style='width:500px'>
 <h1>Welcome to my excellent blog</h1>
 <?php
 \$dbserver = "$SQL_IP";
@@ -87,10 +87,9 @@ cat <<EOF > index.php
 \$dbpassword = "$DB_PASSWORD";
 try {
   \$conn = new PDO("mysql:host=\$dbserver;dbname=mysql", \$dbuser, \$dbpassword);
-  \$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-  echo "Connected successfully";
+  echo "Connected successfully to Cloud SQL!";
 } catch(PDOException \$e) {
-  echo "Database connection failed: " . \$e->getMessage();
+  echo "Connection failed: " . \$e->getMessage();
 }
 ?>
 </body></html>
@@ -99,7 +98,5 @@ EOF
 gcloud compute scp index.php $INSTANCE_NAME:/tmp/index.php --zone=$ZONE --quiet
 gcloud compute ssh $INSTANCE_NAME --zone=$ZONE --quiet --command="sudo mv /tmp/index.php /var/www/html/index.php && sudo service apache2 restart"
 
-echo "--------------------------------------------------"
-echo "HOÀN THÀNH! Hãy thử nhấn Check My Progress."
-echo "Link Blog: http://$VM_IP/index.php"
-echo "--------------------------------------------------"
+echo "--- HOÀN THÀNH ---"
+echo "URL: http://$VM_IP/index.php"
